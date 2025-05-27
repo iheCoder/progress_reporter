@@ -68,20 +68,45 @@ func (pb *ProgressBar) SetCurrentStage(name string) {
 
 // Display 在控制台中打印当前的进度条状态。
 // 输出格式示例:
-// My Task: [=====>--------------------] 25% (5/20) | Stage: Processing | Elapsed: 5s
+// My Task: [=====>--------------------] 25% (5/20) | Stage: Processing | Elapsed: 5s | Avg: 0.5 items/s | ETA: 30s
 func (pb *ProgressBar) Display() {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 
+	elapsedTime := time.Since(pb.startTime)
+	elapsedSeconds := elapsedTime.Seconds()
+
+	avgSpeedString := "0.0 items/s"
+	var avgSpeed float64
+	if elapsedSeconds > 0 && pb.current > 0 {
+		avgSpeed = float64(pb.current) / elapsedSeconds
+		avgSpeedString = fmt.Sprintf("%.1f items/s", avgSpeed)
+	} else if pb.current == 0 && elapsedSeconds > 0 {
+		avgSpeedString = "0.0 items/s"
+	}
+
+	etaString := "N/A"
+	if pb.current == pb.total {
+		etaString = "Done"
+	} else if avgSpeed > 0 {
+		remainingItems := pb.total - pb.current
+		etaSeconds := float64(remainingItems) / avgSpeed
+		etaString = (time.Duration(etaSeconds*1000) * time.Millisecond).Round(time.Second).String()
+	} else if pb.current == 0 && pb.total > 0 {
+		etaString = "Estimating..."
+	}
+
 	if pb.total == 0 { // 防止除以零
-		fmt.Printf("\r%s: [ %s ] %d%% (%d/%d) | Stage: %s | Elapsed: %s",
+		fmt.Printf("\r%s: [ %s ] %d%% (%d/%d) | Stage: %s | Elapsed: %s | Avg: %s | ETA: %s",
 			pb.description,
 			strings.Repeat("-", pb.barLength),
 			0,
 			pb.current,
 			pb.total,
 			pb.currentStageName,
-			time.Since(pb.startTime).Round(time.Second))
+			elapsedTime.Round(time.Second).String(),
+			avgSpeedString,
+			etaString)
 		return
 	}
 
@@ -90,14 +115,16 @@ func (pb *ProgressBar) Display() {
 	bar := strings.Repeat("=", filledLength) + strings.Repeat("-", pb.barLength-filledLength)
 
 	// 使用 \r 回车符将光标移到行首，实现动态更新效果
-	fmt.Printf("\r%s: [%s] %3.0f%% (%d/%d) | Stage: %s | Elapsed: %s",
+	fmt.Printf("\r%s: [%s] %3.0f%% (%d/%d) | Stage: %s | Elapsed: %s | Avg: %s | ETA: %s",
 		pb.description,
 		bar,
 		percent*100,
 		pb.current,
 		pb.total,
 		pb.currentStageName,
-		time.Since(pb.startTime).Round(time.Second))
+		elapsedTime.Round(time.Second).String(),
+		avgSpeedString,
+		etaString)
 
 	if pb.current == pb.total {
 		fmt.Println() // 完成后换行
