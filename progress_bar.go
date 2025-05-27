@@ -3,17 +3,19 @@ package progress_reporter
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
 // ProgressBar 用于跟踪和显示任务的完成进度。
 type ProgressBar struct {
-	total            int       // 总工作单元数
-	current          int       // 当前已完成的工作单元数
-	barLength        int       // 进度条在控制台中显示的长度
-	startTime        time.Time // 进度条开始的时间
-	description      string    // 进度条的描述文字
-	currentStageName string    // 当前阶段名称，用于更细致的进度展示
+	total            int        // 总工作单元数
+	current          int        // 当前已完成的工作单元数
+	barLength        int        // 进度条在控制台中显示的长度
+	startTime        time.Time  // 进度条开始的时间
+	description      string     // 进度条的描述文字
+	currentStageName string     // 当前阶段名称，用于更细致的进度展示
+	mu               sync.Mutex // 用于保护并发访问
 }
 
 // NewProgressBar 创建一个新的 ProgressBar 实例。
@@ -28,6 +30,7 @@ func NewProgressBar(description string, total int, barLength int) *ProgressBar {
 		startTime:        time.Now(),
 		description:      description,
 		currentStageName: "",
+		mu:               sync.Mutex{},
 	}
 }
 
@@ -39,6 +42,13 @@ func (pb *ProgressBar) Increment() {
 // IncrementBy 使已完成的工作单元数增加指定数量，并刷新进度条显示。
 // n: 增加的数量。
 func (pb *ProgressBar) IncrementBy(n int) {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+
+	if n < 0 {
+		fmt.Println("Error: Increment value cannot be negative.")
+		return
+	}
 	pb.current += n
 	if pb.current > pb.total {
 		pb.current = pb.total // 防止当前进度超过总数
@@ -49,6 +59,9 @@ func (pb *ProgressBar) IncrementBy(n int) {
 // SetCurrentStage 设置当前正在进行的阶段名称。
 // name: 阶段的名称。
 func (pb *ProgressBar) SetCurrentStage(name string) {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+
 	pb.currentStageName = name
 	pb.Display() // 更新阶段名称后也刷新显示
 }
@@ -57,6 +70,9 @@ func (pb *ProgressBar) SetCurrentStage(name string) {
 // 输出格式示例:
 // My Task: [=====>--------------------] 25% (5/20) | Stage: Processing | Elapsed: 5s
 func (pb *ProgressBar) Display() {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+
 	if pb.total == 0 { // 防止除以零
 		fmt.Printf("\r%s: [ %s ] %d%% (%d/%d) | Stage: %s | Elapsed: %s",
 			pb.description,
@@ -90,6 +106,9 @@ func (pb *ProgressBar) Display() {
 
 // Finish 标记进度条完成，并打印最终状态。
 func (pb *ProgressBar) Finish() {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+
 	pb.current = pb.total // 确保进度为100%
 	pb.currentStageName = "完成"
 	pb.Display()
