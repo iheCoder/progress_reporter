@@ -56,6 +56,25 @@ func (pb *ProgressBar) IncrementBy(n int) {
 	pb.Display()
 }
 
+// AddTotal 动态增加总工作单元数。
+// n: 要增加到总数上的值。如果为负数，则总数会减少。
+func (pb *ProgressBar) AddTotal(n int) {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+
+	pb.total += n
+	if pb.total < 0 {
+		pb.total = 0 // 总数不能为负
+	}
+
+	// 如果当前进度超过了新的总数（例如，总数被减少了），则调整当前进度
+	if pb.current > pb.total {
+		pb.current = pb.total
+	}
+
+	pb.Display() // 更新总数后刷新显示
+}
+
 // SetCurrentStage 设置当前正在进行的阶段名称。
 // name: 阶段的名称。
 func (pb *ProgressBar) SetCurrentStage(name string) {
