@@ -53,7 +53,9 @@ func (pb *ProgressBar) IncrementBy(n int) {
 	if pb.current > pb.total {
 		pb.current = pb.total // 防止当前进度超过总数
 	}
-	pb.Display()
+
+	pb.displayWithoutLock(pb.current, pb.total, pb.description, pb.barLength,
+		pb.startTime, pb.currentStageName) // 使用不带锁的显示方法
 }
 
 // AddTotal 动态增加总工作单元数。
@@ -72,7 +74,8 @@ func (pb *ProgressBar) AddTotal(n int) {
 		pb.current = pb.total
 	}
 
-	pb.Display() // 更新总数后刷新显示
+	pb.displayWithoutLock(pb.current, pb.total, pb.description, pb.barLength,
+		pb.startTime, pb.currentStageName) // 使用不带锁的显示方法
 }
 
 // SetCurrentStage 设置当前正在进行的阶段名称。
@@ -82,7 +85,8 @@ func (pb *ProgressBar) SetCurrentStage(name string) {
 	defer pb.mu.Unlock()
 
 	pb.currentStageName = name
-	pb.Display() // 更新阶段名称后也刷新显示
+	pb.displayWithoutLock(pb.current, pb.total, pb.description, pb.barLength,
+		pb.startTime, pb.currentStageName) // 使用不带锁的显示方法
 }
 
 // Display 在控制台中打印当前的进度条状态。
@@ -92,62 +96,82 @@ func (pb *ProgressBar) Display() {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 
-	elapsedTime := time.Since(pb.startTime)
-	elapsedSeconds := elapsedTime.Seconds()
-
-	avgSpeedString := "0.0 items/s"
-	var avgSpeed float64
-	if elapsedSeconds > 0 && pb.current > 0 {
-		avgSpeed = float64(pb.current) / elapsedSeconds
-		avgSpeedString = fmt.Sprintf("%.1f items/s", avgSpeed)
-	} else if pb.current == 0 && elapsedSeconds > 0 {
-		avgSpeedString = "0.0 items/s"
-	}
-
-	etaString := "N/A"
-	if pb.current == pb.total {
-		etaString = "Done"
-	} else if avgSpeed > 0 {
-		remainingItems := pb.total - pb.current
-		etaSeconds := float64(remainingItems) / avgSpeed
-		etaString = (time.Duration(etaSeconds*1000) * time.Millisecond).Round(time.Second).String()
-	} else if pb.current == 0 && pb.total > 0 {
-		etaString = "Estimating..."
-	}
-
-	if pb.total == 0 { // 防止除以零
-		fmt.Printf("\r%s: [ %s ] %d%% (%d/%d) | Stage: %s | Elapsed: %s | Avg: %s | ETA: %s",
-			pb.description,
-			strings.Repeat("-", pb.barLength),
-			0,
-			pb.current,
-			pb.total,
-			pb.currentStageName,
-			elapsedTime.Round(time.Second).String(),
-			avgSpeedString,
-			etaString)
-		return
-	}
-
-	percent := float64(pb.current) / float64(pb.total)
-	filledLength := int(float64(pb.barLength) * percent)
-	bar := strings.Repeat("=", filledLength) + strings.Repeat("-", pb.barLength-filledLength)
-
-	// 使用 \r 回车符将光标移到行首，实现动态更新效果
-	fmt.Printf("\r%s: [%s] %3.0f%% (%d/%d) | Stage: %s | Elapsed: %s | Avg: %s | ETA: %s",
-		pb.description,
-		bar,
-		percent*100,
-		pb.current,
-		pb.total,
-		pb.currentStageName,
-		elapsedTime.Round(time.Second).String(),
-		avgSpeedString,
-		etaString)
+	// 使用公共的格式化函数
+	output := pb.formatProgressBar(pb.current, pb.total, pb.description, pb.barLength,
+		pb.startTime, pb.currentStageName)
+	fmt.Print(output)
 
 	if pb.current == pb.total {
 		fmt.Println() // 完成后换行
 	}
+}
+
+// displayWithoutLock 在控制台中打印当前的进度条状态（不带锁）。
+func (pb *ProgressBar) displayWithoutLock(current, total int, description string, barLength int, startTime time.Time, currentStageName string) {
+	// 使用公共的格式化函数
+	output := pb.formatProgressBar(current, total, description, barLength, startTime, currentStageName)
+	fmt.Print(output)
+
+	if current == total {
+		fmt.Println() // 完成后换行
+	}
+}
+
+// formatProgressBar 根据给定的参数格式化进度条字符串
+// 返回一个已格式化的字符串，包含进度条、百分比、计数等信息
+func (pb *ProgressBar) formatProgressBar(current, total int, description string, barLength int,
+	startTime time.Time, currentStageName string) string {
+	elapsedTime := time.Since(startTime)
+	elapsedSeconds := elapsedTime.Seconds()
+
+	avgSpeedString := "0.0 items/s"
+	var avgSpeed float64
+	if elapsedSeconds > 0 && current > 0 {
+		avgSpeed = float64(current) / elapsedSeconds
+		avgSpeedString = fmt.Sprintf("%.1f items/s", avgSpeed)
+	} else if current == 0 && elapsedSeconds > 0 {
+		avgSpeedString = "0.0 items/s"
+	}
+
+	etaString := "N/A"
+	if current == total {
+		etaString = "Done"
+	} else if avgSpeed > 0 {
+		remainingItems := total - current
+		etaSeconds := float64(remainingItems) / avgSpeed
+		etaString = (time.Duration(etaSeconds*1000) * time.Millisecond).Round(time.Second).String()
+	} else if current == 0 && total > 0 {
+		etaString = "Estimating..."
+	}
+
+	if total == 0 { // 防止除以零
+		return fmt.Sprintf("\r%s: [ %s ] %d%% (%d/%d) | Stage: %s | Elapsed: %s | Avg: %s | ETA: %s",
+			description,
+			strings.Repeat("-", barLength),
+			0,
+			current,
+			total,
+			currentStageName,
+			elapsedTime.Round(time.Second).String(),
+			avgSpeedString,
+			etaString)
+	}
+
+	percent := float64(current) / float64(total)
+	filledLength := int(float64(barLength) * percent)
+	bar := strings.Repeat("=", filledLength) + strings.Repeat("-", barLength-filledLength)
+
+	// 使用 \r 回车符将光标移到行首，实现动态更新效果
+	return fmt.Sprintf("\r%s: [%s] %3.0f%% (%d/%d) | Stage: %s | Elapsed: %s | Avg: %s | ETA: %s",
+		description,
+		bar,
+		percent*100,
+		current,
+		total,
+		currentStageName,
+		elapsedTime.Round(time.Second).String(),
+		avgSpeedString,
+		etaString)
 }
 
 // Finish 标记进度条完成，并打印最终状态。
@@ -157,6 +181,7 @@ func (pb *ProgressBar) Finish() {
 
 	pb.current = pb.total // 确保进度为100%
 	pb.currentStageName = "完成"
-	pb.Display()
+	pb.displayWithoutLock(pb.current, pb.total, pb.description, pb.barLength,
+		pb.startTime, pb.currentStageName) // 使用不带锁的显示方法
 	fmt.Println() // 确保在完成后换行
 }
